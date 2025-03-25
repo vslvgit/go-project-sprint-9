@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 // Generator генерирует последовательность чисел 1,2,3 и т.д. и
@@ -18,11 +19,10 @@ func Generator(ctx context.Context, ch chan<- int64, fn func(int64)) {
 		for {
 			select {
 			case <-ctx.Done():
-
+				fmt.Println("Генератор завершил работу")
 				return
-			default:
 
-				ch <- i
+			case ch <- i:
 				fn(i)
 				i++
 
@@ -33,14 +33,23 @@ func Generator(ctx context.Context, ch chan<- int64, fn func(int64)) {
 }
 
 // Worker читает число из канала in и пишет его в канал out.
+
 func Worker(in <-chan int64, out chan<- int64) {
+	defer close(out)
 
-	for value := range in {
+	for {
+		v, ok := <-in
+		if !ok {
+			// Канал in закрыт, завершаем работу
+			return
+		}
 
-		out <- value
+		// Отправляем значение в выходной канал
+		out <- v
 
+		// Делаем паузу на 1 миллисекунду
+		time.Sleep(time.Millisecond)
 	}
-
 }
 
 func main() {
@@ -77,20 +86,22 @@ func main() {
 
 	for i := 0; i < NumOut; i++ {
 		wg.Add(1)
-		go func(index int) {
+		go func(in <-chan int64, index int) {
 			defer wg.Done()
-			for value := range outs[index] {
+			for value := range in {
 				chOut <- value
 				amounts[index]++
 			}
-		}(i)
+			fmt.Println("Рабочая горутина", index, "завершила работу")
+		}(outs[i], i)
 	}
 
 	go func() {
 		// ждём завершения работы всех горутин для outs
 		wg.Wait()
-		// закрываем результирующий канал
-		close(chOut)
+		close(chOut) // Закрываем результирующий канал
+		cancel()     // Останавливаем генератор
+		fmt.Println("Все рабочие горутины завершили работу")
 	}()
 
 	var count int64 // количество чисел результирующего канала
